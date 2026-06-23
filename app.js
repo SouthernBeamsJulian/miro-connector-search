@@ -107,21 +107,30 @@ async function runSearch() {
 // Center the viewport on a connector's CAPTION, not its bounding box.
 //
 // Why: viewport.zoomTo(connector) frames the connector's whole bounding box, so
-// for long or L-shaped connectors the caption ends up at the window edge. Here
-// we instead compute the caption's actual board point and set a fixed-size
-// viewport rectangle centered exactly on it. Because viewport.set preserves the
-// rectangle's CENTER regardless of the screen's aspect ratio/resolution, the
-// caption lands dead-center on any display.
+// for long or L-shaped connectors the caption ends up at the window edge. We
+// instead compute the caption's actual board point and frame around it.
+//
+// Two corrections keep it dead-center on any display:
+//   1. Aspect ratio: we read the live viewport's width/height ratio and build
+//      the target rectangle to match, so viewport.set doesn't reshape (and
+//      shift) our framing.
+//   2. The app panel: this panel covers the right side of the window, so the
+//      VISIBLE canvas center is left of the window center. We add right-side
+//      padding equal to the panel width to push the caption into the middle of
+//      the visible area, not the middle of the full window.
 // ---------------------------------------------------------------------------
 
-// How wide (in board units / dp) the framed area should be. Smaller = closer
-// zoom. 1200 dp is a comfortable "see the connector and its surroundings" level.
-const FRAME_WIDTH = 1200;
-const FRAME_HEIGHT = 800;
+// Half-width (in board units / dp) of the area framed around the caption.
+// Smaller = closer zoom. Tune this one number to taste.
+const FRAME_HALF_WIDTH = 600; // ~1200 dp total width visible
+
+// Width of the Miro app panel, in dp. Per Miro docs the panel is 368 dp wide
+// (including its own padding). This is what we compensate for horizontally.
+const PANEL_WIDTH_DP = 368;
+
+// (endpointPoint and captionPoint are unchanged below.)
 
 // Resolve a connector endpoint to absolute board {x, y}.
-// An endpoint is attached to an item; we read that item's center and, if a
-// relative position (0..1 on the item's box) is given, offset within the box.
 async function endpointPoint(endpoint) {
   if (!endpoint || !endpoint.item) return null;
   let item;
@@ -132,18 +141,15 @@ async function endpointPoint(endpoint) {
   }
   if (!item) return null;
 
-  // Item center in board coords.
   const cx = typeof item.x === "number" ? item.x : 0;
   const cy = typeof item.y === "number" ? item.y : 0;
   const w = typeof item.width === "number" ? item.width : 0;
   const h = typeof item.height === "number" ? item.height : 0;
 
-  // endpoint.position is {x,y} in 0..1 across the item box (0.5,0.5 = center).
   const pos = endpoint.position;
   if (pos && typeof pos.x === "number" && typeof pos.y === "number") {
     return { x: cx - w / 2 + pos.x * w, y: cy - h / 2 + pos.y * h };
   }
-  // snapTo or unspecified -> just use the item center.
   return { x: cx, y: cy };
 }
 
@@ -153,7 +159,6 @@ async function captionPoint(connector) {
   const a = await endpointPoint(connector.start);
   const b = await endpointPoint(connector.end);
 
-  // Caption position along the connector (default mid-line).
   let t = 0.5;
   const caps = connector.captions || [];
   if (caps.length && typeof caps[0].position === "number") {
@@ -163,7 +168,6 @@ async function captionPoint(connector) {
   if (a && b) return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   if (a) return a;
   if (b) return b;
-  // Last resort: connector's own x/y if present.
   if (typeof connector.x === "number" && typeof connector.y === "number") {
     return { x: connector.x, y: connector.y };
   }
@@ -173,21 +177,36 @@ async function captionPoint(connector) {
 async function centerOnCaption(connector) {
   const p = await captionPoint(connector);
   if (!p) {
-    // If we somehow can't locate the caption, fall back to default framing.
     await miro.board.viewport.zoomTo(connector);
     return;
   }
-  // Build a rectangle centered on the caption. viewport.set keeps this center
-  // fixed while it reshapes width/height to the actual screen aspect ratio.
+
+  // Match the target rectangle to the current viewport's aspect ratio so
+  // viewport.set doesn't reshape (and thereby shift) our framing.
+  let aspect = 16 / 9;
+  try {
+    const vp = await miro.board.viewport.get();
+    if (vp && vp.width > 0 && vp.height > 0) aspect = vp.width / vp.height;
+  } catch {
+    /* keep default aspect */
+  }
+
+  const halfW = FRAME_HALF_WIDTH;
+  const halfH = halfW / aspect;
+
+  // Right-side padding shifts the effective center LEFT by half the panel
+  // width, compensating for the panel covering the right of the window so the
+  // caption sits in the middle of the *visible* canvas.
   const target = {
-    x: p.x - FRAME_WIDTH / 2,
-    y: p.y - FRAME_HEIGHT / 2,
-    width: FRAME_WIDTH,
-    height: FRAME_HEIGHT,
+    x: p.x - halfW,
+    y: p.y - halfH,
+    width: halfW * 2,
+    height: halfH * 2,
   };
+
   await miro.board.viewport.set({
     viewport: target,
-    padding: { top: 0, bottom: 0, left: 0, right: 0 },
+    padding: { top: 0, bottom: 0, left: 0, right: PANEL_WIDTH_DP },
     animationDurationInMs: 300,
   });
 }
