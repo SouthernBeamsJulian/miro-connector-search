@@ -107,70 +107,74 @@ async function runSearch() {
 // ---------------------------------------------------------------------------
 // Center the viewport on a connector's CAPTION.
 //
-// Approach: a connector has its own bounding box (x, y, width, height = the
-// box's CENTER and size). The caption sits at a fractional position along the
-// connector (caption.position, 0..1). For the near-vertical connectors on this
-// board, we map that fraction onto the bounding box's vertical extent to land
-// on the text, then frame a fixed-size window around that point.
+// Key facts learned from the live data:
+//  - Connectors here are `elbowed` and have NO top-level x/y (only width/height
+//    of the overall bounding box). So we cannot use a box center.
+//  - Each connector has `start` and `end`, each attached to a board ITEM
+//    (start.item / end.item). Those items DO have real x/y coordinates.
+//  - A caption has a `position` (0..1) along the connector path.
 //
-// Panel correction: the app panel covers the right side of the window, so the
-// visible-canvas center is left of the window center. Right-side padding equal
-// to the panel width pushes the target into the middle of the VISIBLE area.
+// Strategy: look up the two endpoint items to get their board coordinates, then
+// interpolate between them by the caption's position. For elbowed lines this
+// isn't the exact path point, but it lands on the segment between the ends —
+// close to the caption — far better than the bounding-box center (which is huge
+// and off to the side).
+//
+// Panel correction: right-side padding = panel width, so the target sits in the
+// middle of the VISIBLE canvas (the panel covers the right of the window).
 // ---------------------------------------------------------------------------
 
-// Half-width (board units / dp) of the framed area. Smaller = closer zoom.
-const FRAME_HALF_WIDTH = 600;
+const FRAME_HALF_WIDTH = 600;   // smaller = closer zoom
+const PANEL_WIDTH_DP = 368;     // Miro panel width, for horizontal centering
 
-// Miro app panel width in dp (per Miro docs, 368 dp incl. padding).
-const PANEL_WIDTH_DP = 368;
+// Look up an endpoint's attached item and return its center {x, y}.
+async function endpointItemPoint(endpoint) {
+  if (!endpoint || !endpoint.item) return null;
+  let item;
+  try {
+    [item] = await miro.board.get({ id: endpoint.item });
+  } catch {
+    return null;
+  }
+  if (!item) return null;
+  if (typeof item.x === "number" && typeof item.y === "number") {
+    return { x: item.x, y: item.y };
+  }
+  return null;
+}
 
-// Find the caption's board point using the connector's OWN bounding box.
-// connector.x / connector.y = box center; width/height = box size.
-function captionPointFromBox(connector) {
-  const hasBox =
-    typeof connector.x === "number" &&
-    typeof connector.y === "number" &&
-    typeof connector.width === "number" &&
-    typeof connector.height === "number";
-  if (!hasBox) return null;
+async function captionPointFromEndpoints(connector) {
+  const a = await endpointItemPoint(connector.start);
+  const b = await endpointItemPoint(connector.end);
 
-  // Caption fraction along the connector (default mid).
+  // Use the FIRST caption's position as the fraction along the line.
   let t = 0.5;
   const caps = connector.captions || [];
   if (caps.length && typeof caps[0].position === "number") {
     t = Math.min(1, Math.max(0, caps[0].position));
   }
 
-  // Box edges.
-  const top = connector.y - connector.height / 2;
-  const left = connector.x - connector.width / 2;
+  console.log("[connector-search] endpoint A:", a, "endpoint B:", b, "t:", t);
 
-  // For a near-vertical connector, map t onto the vertical extent; keep x at
-  // the box's horizontal center. (t=0 -> top edge, t=1 -> bottom edge.)
-  const x = connector.x;
-  const y = top + t * connector.height;
-
-  return { x, y, boxCenter: { x: connector.x, y: connector.y } };
+  if (a && b) return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  if (a) return a;
+  if (b) return b;
+  return null;
 }
 
 async function centerOnCaption(connector) {
-  const p = captionPointFromBox(connector);
+  const p = await captionPointFromEndpoints(connector);
 
-  // On-screen diagnostic so we can verify without the console.
   if (p) {
-    statusEl.textContent =
-      `target x=${Math.round(p.x)} y=${Math.round(p.y)} ` +
-      `(box center y=${Math.round(p.boxCenter.y)})`;
+    statusEl.textContent = `centering on x=${Math.round(p.x)} y=${Math.round(p.y)}`;
   }
 
   if (!p) {
-    // No usable box -> fall back to the SDK's own framing.
+    // Couldn't resolve endpoints -> let the SDK frame the whole connector.
     await miro.board.viewport.zoomTo(connector);
     return;
   }
 
-  // Match target rect to the live viewport aspect ratio so set() doesn't
-  // reshape and shift our framing.
   let aspect = 16 / 9;
   try {
     const vp = await miro.board.viewport.get();
