@@ -93,8 +93,11 @@ async function runSearch() {
       `<div class="sub">connector ${m.connector.id} — click to zoom</div>`;
     div.addEventListener("click", async () => {
       try {
+        // Center the viewport on the caption. We deliberately do NOT call
+        // miro.board.select() here: selecting an item is a WRITE operation
+        // (it changes shared board state), which would force the boards:write
+        // scope. Searching + zooming only need boards:read.
         await centerOnCaption(m.connector);
-        await miro.board.select({ id: m.connector.id });
       } catch (e) {
         statusEl.textContent = "Couldn't zoom: " + e.message;
       }
