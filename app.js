@@ -93,8 +93,7 @@ async function runSearch() {
       `<div class="sub">connector ${m.connector.id} — click to zoom</div>`;
     div.addEventListener("click", async () => {
       try {
-        // Bring the matched connector into view and select it.
-        await miro.board.viewport.zoomTo(m.connector);
+        await centerOnCaption(m.connector);
         await miro.board.select({ id: m.connector.id });
       } catch (e) {
         statusEl.textContent = "Couldn't zoom: " + e.message;
@@ -102,6 +101,95 @@ async function runSearch() {
     });
     resultsEl.appendChild(div);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Center the viewport on a connector's CAPTION, not its bounding box.
+//
+// Why: viewport.zoomTo(connector) frames the connector's whole bounding box, so
+// for long or L-shaped connectors the caption ends up at the window edge. Here
+// we instead compute the caption's actual board point and set a fixed-size
+// viewport rectangle centered exactly on it. Because viewport.set preserves the
+// rectangle's CENTER regardless of the screen's aspect ratio/resolution, the
+// caption lands dead-center on any display.
+// ---------------------------------------------------------------------------
+
+// How wide (in board units / dp) the framed area should be. Smaller = closer
+// zoom. 1200 dp is a comfortable "see the connector and its surroundings" level.
+const FRAME_WIDTH = 1200;
+const FRAME_HEIGHT = 800;
+
+// Resolve a connector endpoint to absolute board {x, y}.
+// An endpoint is attached to an item; we read that item's center and, if a
+// relative position (0..1 on the item's box) is given, offset within the box.
+async function endpointPoint(endpoint) {
+  if (!endpoint || !endpoint.item) return null;
+  let item;
+  try {
+    [item] = await miro.board.get({ id: endpoint.item });
+  } catch {
+    return null;
+  }
+  if (!item) return null;
+
+  // Item center in board coords.
+  const cx = typeof item.x === "number" ? item.x : 0;
+  const cy = typeof item.y === "number" ? item.y : 0;
+  const w = typeof item.width === "number" ? item.width : 0;
+  const h = typeof item.height === "number" ? item.height : 0;
+
+  // endpoint.position is {x,y} in 0..1 across the item box (0.5,0.5 = center).
+  const pos = endpoint.position;
+  if (pos && typeof pos.x === "number" && typeof pos.y === "number") {
+    return { x: cx - w / 2 + pos.x * w, y: cy - h / 2 + pos.y * h };
+  }
+  // snapTo or unspecified -> just use the item center.
+  return { x: cx, y: cy };
+}
+
+// Compute the caption's board point by interpolating along the line between
+// the two endpoints by the caption's `position` (0..1 along the connector).
+async function captionPoint(connector) {
+  const a = await endpointPoint(connector.start);
+  const b = await endpointPoint(connector.end);
+
+  // Caption position along the connector (default mid-line).
+  let t = 0.5;
+  const caps = connector.captions || [];
+  if (caps.length && typeof caps[0].position === "number") {
+    t = Math.min(1, Math.max(0, caps[0].position));
+  }
+
+  if (a && b) return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  if (a) return a;
+  if (b) return b;
+  // Last resort: connector's own x/y if present.
+  if (typeof connector.x === "number" && typeof connector.y === "number") {
+    return { x: connector.x, y: connector.y };
+  }
+  return null;
+}
+
+async function centerOnCaption(connector) {
+  const p = await captionPoint(connector);
+  if (!p) {
+    // If we somehow can't locate the caption, fall back to default framing.
+    await miro.board.viewport.zoomTo(connector);
+    return;
+  }
+  // Build a rectangle centered on the caption. viewport.set keeps this center
+  // fixed while it reshapes width/height to the actual screen aspect ratio.
+  const target = {
+    x: p.x - FRAME_WIDTH / 2,
+    y: p.y - FRAME_HEIGHT / 2,
+    width: FRAME_WIDTH,
+    height: FRAME_HEIGHT,
+  };
+  await miro.board.viewport.set({
+    viewport: target,
+    padding: { top: 0, bottom: 0, left: 0, right: 0 },
+    animationDurationInMs: 300,
+  });
 }
 
 goEl.addEventListener("click", runSearch);
