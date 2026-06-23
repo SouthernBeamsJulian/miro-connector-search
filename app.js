@@ -127,8 +127,10 @@ async function runSearch() {
 const FRAME_HALF_WIDTH = 600;   // smaller = closer zoom
 const PANEL_WIDTH_DP = 368;     // Miro panel width, for horizontal centering
 
-// Look up an endpoint's attached item and return its center {x, y}.
-async function endpointItemPoint(endpoint) {
+// Resolve an endpoint to its actual ATTACH POINT on the board (not just the
+// item center). The connector attaches at a point on the item's border defined
+// either by snapTo (a side) or by position {x,y} (0..1 across the item box).
+async function endpointAttachPoint(endpoint) {
   if (!endpoint || !endpoint.item) return null;
   let item;
   try {
@@ -136,41 +138,125 @@ async function endpointItemPoint(endpoint) {
   } catch {
     return null;
   }
-  if (!item) return null;
-  if (typeof item.x === "number" && typeof item.y === "number") {
-    return { x: item.x, y: item.y };
+  if (!item || typeof item.x !== "number" || typeof item.y !== "number") {
+    return null;
   }
-  return null;
+  const cx = item.x;
+  const cy = item.y;
+  const w = typeof item.width === "number" ? item.width : 0;
+  const h = typeof item.height === "number" ? item.height : 0;
+
+  // snapTo gives a side of the item box.
+  const snap = endpoint.snapTo;
+  if (snap === "top") return { x: cx, y: cy - h / 2 };
+  if (snap === "bottom") return { x: cx, y: cy + h / 2 };
+  if (snap === "left") return { x: cx - w / 2, y: cy };
+  if (snap === "right") return { x: cx + w / 2, y: cy };
+
+  // position {x,y} 0..1 across the item box.
+  const pos = endpoint.position;
+  if (pos && typeof pos.x === "number" && typeof pos.y === "number") {
+    return { x: cx - w / 2 + pos.x * w, y: cy - h / 2 + pos.y * h };
+  }
+  // Fallback: item center.
+  return { x: cx, y: cy };
 }
 
-async function captionPointFromEndpoints(connector) {
-  const a = await endpointItemPoint(connector.start);
-  const b = await endpointItemPoint(connector.end);
+// Reconstruct the elbowed (right-angle) path between two attach points.
+// Miro routes elbowed connectors in axis-aligned segments. The common case is
+// an L or Z: exit one point, turn at a shared mid-coordinate, enter the other.
+// We build a small polyline of corner points that approximates that routing.
+function buildElbowPath(a, b, startSnap, endSnap) {
+  // Decide whether each end exits vertically or horizontally based on its snap
+  // side (top/bottom => vertical exit; left/right => horizontal exit).
+  const aVertical = startSnap === "top" || startSnap === "bottom";
+  const bVertical = endSnap === "top" || endSnap === "bottom";
 
-  // Use the FIRST caption's position as the fraction along the line.
+  // Case 1: both exit vertically (typical for the vertical wire-number lines):
+  // go vertical from A to a shared mid-Y, horizontal across, vertical into B.
+  if (aVertical && bVertical) {
+    const midY = (a.y + b.y) / 2;
+    return [a, { x: a.x, y: midY }, { x: b.x, y: midY }, b];
+  }
+  // Case 2: both exit horizontally: horizontal to mid-X, vertical, horizontal.
+  if (!aVertical && !bVertical) {
+    const midX = (a.x + b.x) / 2;
+    return [a, { x: midX, y: a.y }, { x: midX, y: b.y }, b];
+  }
+  // Case 3: mixed (one vertical, one horizontal): single L-corner.
+  if (aVertical && !bVertical) {
+    return [a, { x: a.x, y: b.y }, b];
+  }
+  return [a, { x: b.x, y: a.y }, b];
+}
+
+// Walk a polyline by arc-length fraction t (0..1) and return the point there.
+function pointAlongPath(points, t) {
+  if (points.length === 1) return points[0];
+  // Segment lengths.
+  const segLen = [];
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const dx = points[i + 1].x - points[i].x;
+    const dy = points[i + 1].y - points[i].y;
+    const len = Math.hypot(dx, dy);
+    segLen.push(len);
+    total += len;
+  }
+  if (total === 0) return points[0];
+
+  let target = t * total;
+  for (let i = 0; i < segLen.length; i++) {
+    if (target <= segLen[i] || i === segLen.length - 1) {
+      const frac = segLen[i] === 0 ? 0 : target / segLen[i];
+      return {
+        x: points[i].x + (points[i + 1].x - points[i].x) * frac,
+        y: points[i].y + (points[i + 1].y - points[i].y) * frac,
+      };
+    }
+    target -= segLen[i];
+  }
+  return points[points.length - 1];
+}
+
+async function captionPathPoint(connector) {
+  const a = await endpointAttachPoint(connector.start);
+  const b = await endpointAttachPoint(connector.end);
+  if (!a && !b) return null;
+  if (!a) return b;
+  if (!b) return a;
+
+  // Caption fraction along the path.
   let t = 0.5;
   const caps = connector.captions || [];
   if (caps.length && typeof caps[0].position === "number") {
     t = Math.min(1, Math.max(0, caps[0].position));
   }
 
-  console.log("[connector-search] endpoint A:", a, "endpoint B:", b, "t:", t);
+  let path;
+  if (connector.shape === "elbowed") {
+    path = buildElbowPath(a, b, connector.start?.snapTo, connector.end?.snapTo);
+  } else {
+    // straight or curved: treat as a straight segment for positioning.
+    path = [a, b];
+  }
 
-  if (a && b) return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-  if (a) return a;
-  if (b) return b;
-  return null;
+  const p = pointAlongPath(path, t);
+  console.log(
+    "[connector-search] A:", a, "B:", b, "t:", t,
+    "shape:", connector.shape, "path:", path, "-> point:", p
+  );
+  return p;
 }
 
 async function centerOnCaption(connector) {
-  const p = await captionPointFromEndpoints(connector);
+  const p = await captionPathPoint(connector);
 
   if (p) {
     statusEl.textContent = `centering on x=${Math.round(p.x)} y=${Math.round(p.y)}`;
   }
 
   if (!p) {
-    // Couldn't resolve endpoints -> let the SDK frame the whole connector.
     await miro.board.viewport.zoomTo(connector);
     return;
   }
