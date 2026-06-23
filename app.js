@@ -141,6 +141,20 @@ async function endpointAttachPoint(endpoint) {
   if (!item || typeof item.x !== "number" || typeof item.y !== "number") {
     return null;
   }
+  // DIAGNOSTIC: show the raw item so we can spot frame-relative coords or
+  // unexpectedly large values.
+  console.log("[connector-search] endpoint item:", {
+    id: item.id,
+    type: item.type,
+    x: item.x,
+    y: item.y,
+    width: item.width,
+    height: item.height,
+    relativeTo: item.relativeTo,
+    parentId: item.parentId,
+    snapTo: endpoint.snapTo,
+  });
+
   const cx = item.x;
   const cy = item.y;
   const w = typeof item.width === "number" ? item.width : 0;
