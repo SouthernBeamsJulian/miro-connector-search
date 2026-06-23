@@ -91,17 +91,35 @@ async function runSearch() {
     div.innerHTML =
       `<div class="caption">${highlight(m.text, term)}</div>` +
       `<div class="sub">connector ${m.connector.id} — click to zoom</div>`;
+
+    // Track which matching caption to center on; repeated clicks cycle through
+    // all captions on this connector whose text matched the search.
+    let captionCursor = 0;
     div.addEventListener("click", async () => {
       try {
-        // TEMP: log the connector so we can confirm its box/caption fields.
-        console.log("[connector-search] connector:", m.connector);
-        await centerOnCaption(m.connector);
+        const idxs = matchingCaptionIndexes(m.connector, term);
+        const chosen = idxs.length ? idxs[captionCursor % idxs.length] : 0;
+        captionCursor++;
+        await centerOnCaption(m.connector, chosen);
       } catch (e) {
         statusEl.textContent = "Couldn't zoom: " + e.message;
       }
     });
     resultsEl.appendChild(div);
   }
+}
+
+// Return the indexes of captions on this connector whose plain text contains
+// the search term (so we center on a caption the user actually matched).
+function matchingCaptionIndexes(connector, term) {
+  const needle = (term || "").toLowerCase();
+  const caps = connector.captions || [];
+  const out = [];
+  caps.forEach((c, i) => {
+    const txt = stripHtml(typeof c === "string" ? c : c.content).toLowerCase();
+    if (needle && txt.includes(needle)) out.push(i);
+  });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,17 +251,20 @@ function pointAlongPath(points, t) {
   return points[points.length - 1];
 }
 
-async function captionPathPoint(connector) {
+async function captionPathPoint(connector, captionIndex = 0) {
   const a = await endpointAttachPoint(connector.start);
   const b = await endpointAttachPoint(connector.end);
   if (!a && !b) return null;
   if (!a) return b;
   if (!b) return a;
 
-  // Caption fraction along the path.
+  // Fraction along the path for the CHOSEN caption.
   let t = 0.5;
   const caps = connector.captions || [];
-  if (caps.length && typeof caps[0].position === "number") {
+  const cap = caps[captionIndex];
+  if (cap && typeof cap.position === "number") {
+    t = Math.min(1, Math.max(0, cap.position));
+  } else if (caps.length && typeof caps[0].position === "number") {
     t = Math.min(1, Math.max(0, caps[0].position));
   }
 
@@ -251,20 +272,32 @@ async function captionPathPoint(connector) {
   if (connector.shape === "elbowed") {
     path = buildElbowPath(a, b, connector.start?.snapTo, connector.end?.snapTo);
   } else {
-    // straight or curved: treat as a straight segment for positioning.
     path = [a, b];
   }
 
-  const p = pointAlongPath(path, t);
+  // Wire-number labels sit very near an endpoint. Our endpoint attach points
+  // (a, b) are EXACT, while the reconstructed mid-path is approximate. So if the
+  // caption's fraction is close to an end, snap to that exact endpoint — this
+  // lands on the label far more reliably than interpolating a fuzzy path.
+  const SNAP_THRESHOLD = 0.25; // within 25% of an end -> use that exact end
+  let p;
+  if (t <= SNAP_THRESHOLD) {
+    p = a; // near the start end
+  } else if (t >= 1 - SNAP_THRESHOLD) {
+    p = b; // near the end end
+  } else {
+    p = pointAlongPath(path, t);
+  }
+
   console.log(
-    "[connector-search] A:", a, "B:", b, "t:", t,
-    "shape:", connector.shape, "path:", path, "-> point:", p
+    "[connector-search] capIdx:", captionIndex, "A:", a, "B:", b, "t:", t,
+    "shape:", connector.shape, "-> point:", p
   );
   return p;
 }
 
-async function centerOnCaption(connector) {
-  const p = await captionPathPoint(connector);
+async function centerOnCaption(connector, captionIndex = 0) {
+  const p = await captionPathPoint(connector, captionIndex);
 
   if (p) {
     statusEl.textContent = `centering on x=${Math.round(p.x)} y=${Math.round(p.y)}`;
