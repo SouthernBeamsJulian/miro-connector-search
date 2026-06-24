@@ -1,79 +1,17 @@
 // ---------------------------------------------------------------------------
 // Connector Search — panel logic
 // Reads every connector on the current board, filters by caption text, and
-// lets you click a result to zoom the viewport to that connector.
-// All of this runs client-side through the Web SDK — no REST API, no tokens.
+// lets you click a result to frame the connector (its two endpoints) in view.
+// Runs entirely client-side through the Web SDK — no REST API, no tokens.
 // ---------------------------------------------------------------------------
-
-// Build stamp — shown in the status line so you can confirm Miro is running the
-// latest deployed file (not a cached older one). Bump this each time you deploy.
-const BUILD_VERSION = "2026-06-24 02:20 UTC autocenter";
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
 
-// Live offset tuners (percent of the connector's own size). Read at click time.
-const dxEl = document.getElementById("dx");
-const dyEl = document.getElementById("dy");
-const dxNumEl = document.getElementById("dxNum");
-const dyNumEl = document.getElementById("dyNum");
-
-function clampPct(v) {
-  v = Number(v);
-  if (!isFinite(v)) return 0;
-  return Math.max(-100, Math.min(100, v));
-}
-
-function dxFraction() {
-  return (dxEl ? Number(dxEl.value) : 0) / 100;
-}
-function dyFraction() {
-  return (dyEl ? Number(dyEl.value) : 0) / 100;
-}
-
-// Keep a slider and its number box in sync, in BOTH directions. Dragging the
-// slider updates the box; typing in the box moves the slider. Either way the
-// status line echoes the live values so we can confirm events fire.
-function wireTuner(sliderEl, numEl, name) {
-  if (!sliderEl) return false;
-  const echo = function () {
-    if (statusEl) {
-      statusEl.textContent =
-        `dx=${dxEl ? dxEl.value : "?"}% dy=${dyEl ? dyEl.value : "?"}% · build ${BUILD_VERSION}`;
-    }
-  };
-  // Slider -> number
-  const fromSlider = function () {
-    if (numEl) numEl.value = sliderEl.value;
-    echo();
-  };
-  sliderEl.addEventListener("input", fromSlider);
-  sliderEl.addEventListener("change", fromSlider);
-  // Number -> slider
-  if (numEl) {
-    const fromNum = function () {
-      const v = clampPct(numEl.value);
-      sliderEl.value = String(v);
-      echo();
-    };
-    numEl.addEventListener("input", fromNum);
-    numEl.addEventListener("change", fromNum);
-  }
-  fromSlider();
-  return true;
-}
-
-const dxOk = wireTuner(dxEl, dxNumEl, "dx");
-const dyOk = wireTuner(dyEl, dyNumEl, "dy");
-if (statusEl) {
-  statusEl.textContent =
-    `tuners found: dx=${dxOk} dy=${dyOk} · build ${BUILD_VERSION}`;
-}
-
-// Connector captions can contain inline HTML (e.g. "<p>depends</p>").
-// Strip tags so we search and display the plain text the user actually sees.
+// Connector captions can contain inline HTML (e.g. "<p>8002</p>"). Strip tags
+// so we search and display the plain text the user actually sees.
 function stripHtml(html) {
   if (!html) return "";
   const tmp = document.createElement("div");
@@ -81,8 +19,6 @@ function stripHtml(html) {
   return (tmp.textContent || tmp.innerText || "").trim();
 }
 
-// Pull all caption strings off a single connector object.
-// The SDK exposes captions as an array of { content, ... } objects.
 function captionTextsOf(connector) {
   const caps = connector.captions || [];
   return caps
@@ -92,19 +28,82 @@ function captionTextsOf(connector) {
 
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
 }
 
 function highlight(text, term) {
   const safe = escapeHtml(text);
   if (!term) return safe;
-  const re = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  const re = new RegExp(
+    `(${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"
+  );
   return safe.replace(re, "<mark>$1</mark>");
+}
+
+// Resolve a connector endpoint to its attach point on the board. The endpoint
+// is attached to an item; snapTo gives a side, or position gives 0..1 in the
+// item's box. Falls back to the item center.
+async function endpointPoint(endpoint) {
+  if (!endpoint || !endpoint.item) return null;
+  let item;
+  try {
+    [item] = await miro.board.get({ id: endpoint.item });
+  } catch {
+    return null;
+  }
+  if (!item || typeof item.x !== "number" || typeof item.y !== "number") {
+    return null;
+  }
+  const cx = item.x;
+  const cy = item.y;
+  const w = typeof item.width === "number" ? item.width : 0;
+  const h = typeof item.height === "number" ? item.height : 0;
+  const snap = endpoint.snapTo;
+  if (snap === "top") return { x: cx, y: cy - h / 2 };
+  if (snap === "bottom") return { x: cx, y: cy + h / 2 };
+  if (snap === "left") return { x: cx - w / 2, y: cy };
+  if (snap === "right") return { x: cx + w / 2, y: cy };
+  const pos = endpoint.position;
+  if (pos && typeof pos.x === "number" && typeof pos.y === "number") {
+    return { x: cx - w / 2 + pos.x * w, y: cy - h / 2 + pos.y * h };
+  }
+  return { x: cx, y: cy };
+}
+
+// Frame the connector's two endpoints in the viewport.
+async function frameConnector(connector) {
+  const a = await endpointPoint(connector.start);
+  const b = await endpointPoint(connector.end);
+
+  // If we can't resolve endpoints, fall back to the SDK's own framing.
+  if (!a && !b) {
+    await miro.board.viewport.zoomTo(connector);
+    return;
+  }
+  const p1 = a || b;
+  const p2 = b || a;
+
+  // Bounding box around the two endpoints, with a margin so the line isn't
+  // jammed against the window edges. Margin scales with the line's size but has
+  // a sensible minimum for very short connectors.
+  const minX = Math.min(p1.x, p2.x);
+  const minY = Math.min(p1.y, p2.y);
+  const spanX = Math.abs(p2.x - p1.x);
+  const spanY = Math.abs(p2.y - p1.y);
+  const margin = Math.max(200, spanX * 0.2, spanY * 0.2);
+
+  const viewport = {
+    x: minX - margin,
+    y: minY - margin,
+    width: spanX + margin * 2,
+    height: spanY + margin * 2,
+  };
+
+  await miro.board.viewport.set({
+    viewport,
+    animationDurationInMs: 300,
+  });
 }
 
 async function runSearch() {
@@ -120,8 +119,6 @@ async function runSearch() {
 
   let connectors;
   try {
-    // get() returns every connector on the board. For very large boards this
-    // is the slowest step, but it's a single call and runs locally.
     connectors = await miro.board.get({ type: "connector" });
   } catch (e) {
     statusEl.textContent = "Couldn't read the board: " + e.message;
@@ -130,7 +127,6 @@ async function runSearch() {
 
   const needle = term.toLowerCase();
   const matches = [];
-
   for (const c of connectors) {
     const texts = captionTextsOf(c);
     const hit = texts.find((t) => t.toLowerCase().includes(needle));
@@ -152,288 +148,16 @@ async function runSearch() {
     div.className = "result";
     div.innerHTML =
       `<div class="caption">${highlight(m.text, term)}</div>` +
-      `<div class="sub">connector ${m.connector.id} — click to zoom</div>`;
-
-    // Track which matching caption to center on; repeated clicks cycle through
-    // all captions on this connector whose text matched the search.
-    let captionCursor = 0;
+      `<div class="sub">connector ${m.connector.id} — click to view</div>`;
     div.addEventListener("click", async () => {
       try {
-        const idxs = matchingCaptionIndexes(m.connector, term);
-        const chosen = idxs.length ? idxs[captionCursor % idxs.length] : 0;
-        captionCursor++;
-        lastClicked = { connector: m.connector, captionIndex: chosen, term };
-        await centerOnCaption(m.connector, chosen);
+        await frameConnector(m.connector);
       } catch (e) {
-        statusEl.textContent = "Couldn't zoom: " + e.message;
+        statusEl.textContent = "Couldn't focus: " + e.message;
       }
     });
     resultsEl.appendChild(div);
   }
-}
-
-// Remember the last result clicked, so the Capture button can log its geometry
-// alongside the slider values you dialed in.
-let lastClicked = null;
-
-// Return the indexes of captions on this connector whose plain text contains
-// the search term (so we center on a caption the user actually matched).
-function matchingCaptionIndexes(connector, term) {
-  const needle = (term || "").toLowerCase();
-  const caps = connector.captions || [];
-  const out = [];
-  caps.forEach((c, i) => {
-    const txt = stripHtml(typeof c === "string" ? c : c.content).toLowerCase();
-    if (needle && txt.includes(needle)) out.push(i);
-  });
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Center the viewport on a connector's CAPTION.
-//
-// Key facts learned from the live data:
-//  - Connectors here are `elbowed` and have NO top-level x/y (only width/height
-//    of the overall bounding box). So we cannot use a box center.
-//  - Each connector has `start` and `end`, each attached to a board ITEM
-//    (start.item / end.item). Those items DO have real x/y coordinates.
-//  - A caption has a `position` (0..1) along the connector path.
-//
-// Strategy: look up the two endpoint items to get their board coordinates, then
-// interpolate between them by the caption's position. For elbowed lines this
-// isn't the exact path point, but it lands on the segment between the ends —
-// close to the caption — far better than the bounding-box center (which is huge
-// and off to the side).
-//
-// Panel correction: right-side padding = panel width, so the target sits in the
-// middle of the VISIBLE canvas (the panel covers the right of the window).
-// ---------------------------------------------------------------------------
-
-const FRAME_HALF_WIDTH = 600;   // smaller = closer zoom
-
-// Horizontal centering correction for the panel covering the right of the
-// window. 0 disables it. Raise only if every result lands too far right.
-const PANEL_WIDTH_DP = 0;
-
-// NOTE: the caption offset is no longer a fixed distance. It is set live by the
-// dx%/dy% sliders in the panel and applied as a fraction of EACH connector's
-// own width/height (see captionPathPoint), so it scales per line. Once the
-// right percentages are found, set the sliders' default `value` in app.html.
-
-// Resolve an endpoint to its actual ATTACH POINT on the board (not just the
-// item center). The connector attaches at a point on the item's border defined
-// either by snapTo (a side) or by position {x,y} (0..1 across the item box).
-async function endpointAttachPoint(endpoint) {
-  if (!endpoint || !endpoint.item) return null;
-  let item;
-  try {
-    [item] = await miro.board.get({ id: endpoint.item });
-  } catch {
-    return null;
-  }
-  if (!item || typeof item.x !== "number" || typeof item.y !== "number") {
-    return null;
-  }
-  // DIAGNOSTIC: show the raw item so we can spot frame-relative coords or
-  // unexpectedly large values.
-  console.log("[connector-search] endpoint item:", {
-    id: item.id,
-    type: item.type,
-    x: item.x,
-    y: item.y,
-    width: item.width,
-    height: item.height,
-    relativeTo: item.relativeTo,
-    parentId: item.parentId,
-    snapTo: endpoint.snapTo,
-  });
-
-  const cx = item.x;
-  const cy = item.y;
-  const w = typeof item.width === "number" ? item.width : 0;
-  const h = typeof item.height === "number" ? item.height : 0;
-
-  // snapTo gives a side of the item box.
-  const snap = endpoint.snapTo;
-  if (snap === "top") return { x: cx, y: cy - h / 2 };
-  if (snap === "bottom") return { x: cx, y: cy + h / 2 };
-  if (snap === "left") return { x: cx - w / 2, y: cy };
-  if (snap === "right") return { x: cx + w / 2, y: cy };
-
-  // position {x,y} 0..1 across the item box.
-  const pos = endpoint.position;
-  if (pos && typeof pos.x === "number" && typeof pos.y === "number") {
-    return { x: cx - w / 2 + pos.x * w, y: cy - h / 2 + pos.y * h };
-  }
-  // Fallback: item center.
-  return { x: cx, y: cy };
-}
-
-// Reconstruct the elbowed (right-angle) path between two attach points.
-// Miro routes elbowed connectors in axis-aligned segments. The common case is
-// an L or Z: exit one point, turn at a shared mid-coordinate, enter the other.
-// We build a small polyline of corner points that approximates that routing.
-function buildElbowPath(a, b, startSnap, endSnap) {
-  // Decide whether each end exits vertically or horizontally based on its snap
-  // side (top/bottom => vertical exit; left/right => horizontal exit).
-  const aVertical = startSnap === "top" || startSnap === "bottom";
-  const bVertical = endSnap === "top" || endSnap === "bottom";
-
-  // Case 1: both exit vertically (typical for the vertical wire-number lines):
-  // go vertical from A to a shared mid-Y, horizontal across, vertical into B.
-  if (aVertical && bVertical) {
-    const midY = (a.y + b.y) / 2;
-    return [a, { x: a.x, y: midY }, { x: b.x, y: midY }, b];
-  }
-  // Case 2: both exit horizontally: horizontal to mid-X, vertical, horizontal.
-  if (!aVertical && !bVertical) {
-    const midX = (a.x + b.x) / 2;
-    return [a, { x: midX, y: a.y }, { x: midX, y: b.y }, b];
-  }
-  // Case 3: mixed (one vertical, one horizontal): single L-corner.
-  if (aVertical && !bVertical) {
-    return [a, { x: a.x, y: b.y }, b];
-  }
-  return [a, { x: b.x, y: a.y }, b];
-}
-
-// Walk a polyline by arc-length fraction t (0..1) and return the point there.
-function pointAlongPath(points, t) {
-  if (points.length === 1) return points[0];
-  // Segment lengths.
-  const segLen = [];
-  let total = 0;
-  for (let i = 0; i < points.length - 1; i++) {
-    const dx = points[i + 1].x - points[i].x;
-    const dy = points[i + 1].y - points[i].y;
-    const len = Math.hypot(dx, dy);
-    segLen.push(len);
-    total += len;
-  }
-  if (total === 0) return points[0];
-
-  let target = t * total;
-  for (let i = 0; i < segLen.length; i++) {
-    if (target <= segLen[i] || i === segLen.length - 1) {
-      const frac = segLen[i] === 0 ? 0 : target / segLen[i];
-      return {
-        x: points[i].x + (points[i + 1].x - points[i].x) * frac,
-        y: points[i].y + (points[i + 1].y - points[i].y) * frac,
-      };
-    }
-    target -= segLen[i];
-  }
-  return points[points.length - 1];
-}
-
-async function captionPathPoint(connector, captionIndex = 0) {
-  const a = await endpointAttachPoint(connector.start);
-  const b = await endpointAttachPoint(connector.end);
-  if (!a && !b) return null;
-  if (!a) return b;
-  if (!b) return a;
-
-  // Fraction along the path for the CHOSEN caption.
-  let t = 0.5;
-  const caps = connector.captions || [];
-  const cap = caps[captionIndex];
-  if (cap && typeof cap.position === "number") {
-    t = Math.min(1, Math.max(0, cap.position));
-  } else if (caps.length && typeof caps[0].position === "number") {
-    t = Math.min(1, Math.max(0, caps[0].position));
-  }
-
-  // BASE: walk the reconstructed elbow path by caption.position. Verified
-  // against real captures (vertical top/bottom + horizontal left wires) — this
-  // lands on the label for the large majority of connectors automatically.
-  const path = buildElbowPath(
-    a, b, connector.start?.snapTo, connector.end?.snapTo
-  );
-  const base = pointAlongPath(path, t);
-
-  // MANUAL NUDGE: the dx/dy boxes add an optional offset as a % of the
-  // connector's own size, for the occasional outlier the auto-formula misses.
-  // Default 0/0 means pure auto-centering. Direction follows toward far end.
-  const nearStart = t < 0.5;
-  const far = nearStart ? b : a;
-  const near = nearStart ? a : b;
-  const signX = Math.sign(far.x - near.x) || 1;
-  const signY = Math.sign(far.y - near.y) || 1;
-  const w = typeof connector.width === "number" ? connector.width : 0;
-  const h = typeof connector.height === "number" ? connector.height : 0;
-  const fx = dxFraction();
-  const fy = dyFraction();
-
-  const p = {
-    x: base.x + signX * fx * w,
-    y: base.y + signY * fy * h,
-  };
-
-  console.log(
-    "[connector-search] capIdx:", captionIndex, "t:", t,
-    "base:", base, "nudge%:", { dx: fx * 100, dy: fy * 100 }, "-> point:", p
-  );
-  return p;
-}
-
-async function centerOnCaption(connector, captionIndex = 0) {
-  const p = await captionPathPoint(connector, captionIndex);
-
-  if (p) {
-    statusEl.textContent =
-      `centering on x=${Math.round(p.x)} y=${Math.round(p.y)} · build ${BUILD_VERSION}`;
-  }
-
-  if (!p) {
-    await miro.board.viewport.zoomTo(connector);
-    return;
-  }
-
-  let aspect = 16 / 9;
-  try {
-    const vp = await miro.board.viewport.get();
-    if (vp && vp.width > 0 && vp.height > 0) aspect = vp.width / vp.height;
-  } catch {
-    /* keep default */
-  }
-
-  const halfW = FRAME_HALF_WIDTH;
-  const halfH = halfW / aspect;
-
-  const target = {
-    x: p.x - halfW,
-    y: p.y - halfH,
-    width: halfW * 2,
-    height: halfH * 2,
-  };
-
-  await miro.board.viewport.set({
-    viewport: target,
-    padding: { top: 0, bottom: 0, left: 0, right: PANEL_WIDTH_DP },
-    animationDurationInMs: 300,
-  });
-
-  // DECISIVE DIAGNOSTIC: read where Miro actually landed AFTER the move. If this
-  // center doesn't match the point we asked for, the problem is the zoom being
-  // overridden/clamped — not our math. We wait past the animation, then report
-  // requested-vs-actual in the status line.
-  setTimeout(async () => {
-    try {
-      const after = await miro.board.viewport.get();
-      const actualCx = Math.round(after.x + after.width / 2);
-      const actualCy = Math.round(after.y + after.height / 2);
-      const dx = actualCx - Math.round(p.x);
-      const dy = actualCy - Math.round(p.y);
-      statusEl.textContent =
-        `asked x=${Math.round(p.x)} y=${Math.round(p.y)} | ` +
-        `landed x=${actualCx} y=${actualCy} | ` +
-        `off dx=${dx} dy=${dy} · build ${BUILD_VERSION}`;
-      console.log("[connector-search] post-move viewport:", after,
-        "requested point:", p, "delta:", { dx, dy });
-    } catch (e) {
-      console.log("[connector-search] post-move viewport.get failed:", e);
-    }
-  }, 600);
 }
 
 goEl.addEventListener("click", runSearch);
@@ -441,63 +165,4 @@ qEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") runSearch();
 });
 
-// Capture button: gather the last-clicked connector's geometry + the slider
-// values you settled on, into a single copyable line. Collect a few of these
-// across different connectors and the general centering formula can be derived.
-const captureEl = document.getElementById("capture");
-
-// Show capture output in the dedicated textarea defined in the HTML (full
-// width, box-sizing fixed so it never overflows the panel). Clipboard is often
-// blocked inside the Miro iframe, so we never depend on it — you select and
-// copy from this box manually.
-function showCapture(text) {
-  const box = document.getElementById("captureOut");
-  if (!box) return;
-  box.style.display = "block";
-  box.value = text;
-  box.focus();
-  box.select();
-}
-
-if (captureEl) {
-  captureEl.addEventListener("click", async () => {
-    try {
-      if (!lastClicked) {
-        showCapture("Click a search result first, then Capture.");
-        return;
-      }
-      const c = lastClicked.connector;
-      const a = await endpointAttachPoint(c.start);
-      const b = await endpointAttachPoint(c.end);
-      const cap = (c.captions || [])[lastClicked.captionIndex] || {};
-      const row = {
-        id: c.id,
-        shape: c.shape,
-        width: c.width,
-        height: c.height,
-        startSnap: c.start?.snapTo,
-        endSnap: c.end?.snapTo,
-        A: a,
-        B: b,
-        captionIndex: lastClicked.captionIndex,
-        captionPosition: cap.position,
-        captionText: stripHtml(cap.content || ""),
-        good_dx_pct: dxEl ? Number(dxEl.value) : null,
-        good_dy_pct: dyEl ? Number(dyEl.value) : null,
-      };
-      const text = "CAPTURE " + JSON.stringify(row);
-      console.log("[connector-search]", text);
-      showCapture(text);
-      // Best-effort clipboard; ignore if the iframe blocks it.
-      try { await navigator.clipboard.writeText(text); } catch {}
-    } catch (e) {
-      showCapture("Capture error: " + e.message);
-    }
-  });
-}
-
-// Focus the input as soon as the panel opens.
 qEl.focus();
-
-// Show the build version immediately so you can confirm the deployed version.
-if (statusEl) statusEl.textContent = `build ${BUILD_VERSION} — ready`;

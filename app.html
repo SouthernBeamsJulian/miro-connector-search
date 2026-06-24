@@ -3,146 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <title>Connector Search</title>
-    <!-- Miro Web SDK -->
     <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
-    <!-- Mirotone: Miro's official CSS so the panel matches the board UI -->
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/mirotone/dist/styles.css"
-    />
+    <link rel="stylesheet" href="https://unpkg.com/mirotone/dist/styles.css" />
     <style>
-      body {
-        margin: 0;
-        padding: 16px;
-        box-sizing: border-box;
-      }
-      .row {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 12px;
-      }
-      .row input {
-        flex: 1;
-      }
-      .meta {
-        font-size: 12px;
-        color: var(--indigo700, #4262ff);
-        margin-bottom: 8px;
-      }
-      .muted {
-        color: #585858;
-        font-size: 12px;
-      }
+      body { margin: 0; padding: 16px; box-sizing: border-box; }
+      .row { display: flex; gap: 8px; margin-bottom: 12px; }
+      .row input { flex: 1; }
+      .meta { font-size: 12px; color: #585858; margin-bottom: 8px; }
+      .muted { color: #787878; font-size: 12px; }
       .result {
-        border: 1px solid #e6e6e6;
-        border-radius: 6px;
-        padding: 8px 10px;
-        margin-bottom: 8px;
-        cursor: pointer;
+        border: 1px solid #e6e6e6; border-radius: 6px;
+        padding: 8px 10px; margin-bottom: 8px; cursor: pointer;
       }
-      .result:hover {
-        background: #f2f2f4;
-      }
+      .result:hover { background: #f2f2f4; }
       .result .caption {
-        font-size: 13px;
-        margin-bottom: 2px;
-        word-break: break-word;
+        font-size: 13px; margin-bottom: 2px; word-break: break-word;
       }
-      .result .sub {
-        font-size: 11px;
-        color: #787878;
-      }
-      mark {
-        background: #ffd02f;
-        padding: 0 1px;
-      }
-      .tuner {
-        border: 1px solid #e6e6e6;
-        border-radius: 6px;
-        padding: 8px 10px;
-        margin-bottom: 12px;
-        font-size: 12px;
-      }
-      .tuner .tuner-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin: 6px 0;
-      }
-      .tuner .tuner-row label {
-        width: 70px;
-        color: #585858;
-      }
-      .tuner .tuner-row input[type="range"] {
-        flex: 1;
-      }
-      .tuner .tuner-row .val {
-        width: 56px;
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .tuner .tuner-row .numbox {
-        width: 64px;
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-        font-size: 12px;
-        padding: 2px 4px;
-        box-sizing: border-box;
-      }
-      .tuner .hint {
-        color: #787878;
-        margin-top: 4px;
-      }
+      .result .sub { font-size: 11px; color: #787878; }
+      mark { background: #ffd02f; padding: 0 1px; }
     </style>
   </head>
   <body>
     <div class="row">
-      <input
-        id="q"
-        class="input"
-        type="text"
-        placeholder="Search connector text…"
-        autocomplete="off"
-      />
+      <input id="q" class="input" type="text"
+             placeholder="Search connector text…" autocomplete="off" />
       <button id="go" class="button button-primary">Search</button>
     </div>
-
-    <div class="tuner">
-      <div class="tuner-row">
-        <label for="dx">dx %</label>
-        <input id="dx" type="range" min="-100" max="100" step="1" value="0" />
-        <input id="dxNum" class="numbox" type="number" min="-100" max="100"
-               step="1" value="0" />
-      </div>
-      <div class="tuner-row">
-        <label for="dy">dy %</label>
-        <input id="dy" type="range" min="-100" max="100" step="1" value="0" />
-        <input id="dyNum" class="numbox" type="number" min="-100" max="100"
-               step="1" value="0" />
-      </div>
-      <div class="hint">
-        Auto-centers on the label. dx/dy are an OPTIONAL nudge (% of the
-        connector's size) for the rare connector it misses — leave at 0 for most.
-        Click the same result again to re-center after changing them.
-      </div>
-      <div class="tuner-row">
-        <button id="capture" class="button button-secondary" style="width:100%">
-          Capture this connector's data + current dx/dy
-        </button>
-      </div>
-      <textarea
-        id="captureOut"
-        readonly
-        placeholder="Capture output appears here — tap, select all, copy."
-        style="display:none; width:100%; box-sizing:border-box; height:100px;
-               margin-top:8px; font-size:11px; font-family:monospace;
-               resize:vertical;"
-      ></textarea>
-    </div>
-
     <div class="meta" id="status">Type a term and press Search (or Enter).</div>
     <div id="results"></div>
-
-    <script src="app.js?v=20260624f"></script>
+    <script src="app.js?v=20260624g"></script>
   </body>
 </html>
