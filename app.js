@@ -7,7 +7,7 @@
 
 // Build stamp — shown in the status line so you can confirm Miro is running the
 // latest deployed file (not a cached older one). Bump this each time you deploy.
-const BUILD_VERSION = "2026-06-24 01:40 UTC capture2";
+const BUILD_VERSION = "2026-06-24 02:02 UTC numboxes";
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
@@ -17,8 +17,14 @@ const resultsEl = document.getElementById("results");
 // Live offset tuners (percent of the connector's own size). Read at click time.
 const dxEl = document.getElementById("dx");
 const dyEl = document.getElementById("dy");
-const dxValEl = document.getElementById("dxVal");
-const dyValEl = document.getElementById("dyVal");
+const dxNumEl = document.getElementById("dxNum");
+const dyNumEl = document.getElementById("dyNum");
+
+function clampPct(v) {
+  v = Number(v);
+  if (!isFinite(v)) return 0;
+  return Math.max(-100, Math.min(100, v));
+}
 
 function dxFraction() {
   return (dxEl ? Number(dxEl.value) : 0) / 100;
@@ -27,29 +33,43 @@ function dyFraction() {
   return (dyEl ? Number(dyEl.value) : 0) / 100;
 }
 
-// Robust slider wiring with a visible self-test. On every drag we update BOTH
-// the little %-label and the status line, so we can see live whether events are
-// firing at all. At startup we report whether the slider elements were found.
-function wireSlider(sliderEl, valEl, name) {
+// Keep a slider and its number box in sync, in BOTH directions. Dragging the
+// slider updates the box; typing in the box moves the slider. Either way the
+// status line echoes the live values so we can confirm events fire.
+function wireTuner(sliderEl, numEl, name) {
   if (!sliderEl) return false;
-  const handler = function () {
-    if (valEl) valEl.textContent = sliderEl.value + "%";
+  const echo = function () {
     if (statusEl) {
       statusEl.textContent =
-        `${name}=${sliderEl.value}%  (dx=${dxEl ? dxEl.value : "?"} dy=${dyEl ? dyEl.value : "?"}) · build ${BUILD_VERSION}`;
+        `dx=${dxEl ? dxEl.value : "?"}% dy=${dyEl ? dyEl.value : "?"}% · build ${BUILD_VERSION}`;
     }
   };
-  sliderEl.addEventListener("input", handler);
-  sliderEl.addEventListener("change", handler);
-  handler();
+  // Slider -> number
+  const fromSlider = function () {
+    if (numEl) numEl.value = sliderEl.value;
+    echo();
+  };
+  sliderEl.addEventListener("input", fromSlider);
+  sliderEl.addEventListener("change", fromSlider);
+  // Number -> slider
+  if (numEl) {
+    const fromNum = function () {
+      const v = clampPct(numEl.value);
+      sliderEl.value = String(v);
+      echo();
+    };
+    numEl.addEventListener("input", fromNum);
+    numEl.addEventListener("change", fromNum);
+  }
+  fromSlider();
   return true;
 }
 
-const dxOk = wireSlider(dxEl, dxValEl, "dx");
-const dyOk = wireSlider(dyEl, dyValEl, "dy");
+const dxOk = wireTuner(dxEl, dxNumEl, "dx");
+const dyOk = wireTuner(dyEl, dyNumEl, "dy");
 if (statusEl) {
   statusEl.textContent =
-    `sliders found: dx=${dxOk} dy=${dyOk} · build ${BUILD_VERSION}`;
+    `tuners found: dx=${dxOk} dy=${dyOk} · build ${BUILD_VERSION}`;
 }
 
 // Connector captions can contain inline HTML (e.g. "<p>depends</p>").
@@ -425,26 +445,14 @@ qEl.addEventListener("keydown", (e) => {
 // across different connectors and the general centering formula can be derived.
 const captureEl = document.getElementById("capture");
 
-// Show capture output as SELECTABLE text in the panel (clipboard is often
-// blocked inside the Miro iframe, so we never depend on it). Creates/reuses a
-// textarea below the button that you can select-all and copy manually.
+// Show capture output in the dedicated textarea defined in the HTML (full
+// width, box-sizing fixed so it never overflows the panel). Clipboard is often
+// blocked inside the Miro iframe, so we never depend on it — you select and
+// copy from this box manually.
 function showCapture(text) {
-  let box = document.getElementById("captureOut");
-  if (!box) {
-    box = document.createElement("textarea");
-    box.id = "captureOut";
-    box.readOnly = true;
-    box.style.width = "100%";
-    box.style.height = "90px";
-    box.style.marginTop = "8px";
-    box.style.fontSize = "11px";
-    box.style.fontFamily = "monospace";
-    if (captureEl && captureEl.parentNode) {
-      captureEl.parentNode.appendChild(box);
-    } else {
-      document.body.appendChild(box);
-    }
-  }
+  const box = document.getElementById("captureOut");
+  if (!box) return;
+  box.style.display = "block";
   box.value = text;
   box.focus();
   box.select();
