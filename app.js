@@ -7,7 +7,7 @@
 
 // Build stamp — shown in the status line so you can confirm Miro is running the
 // latest deployed file (not a cached older one). Bump this each time you deploy.
-const BUILD_VERSION = "2026-06-24 02:02 UTC numboxes";
+const BUILD_VERSION = "2026-06-24 02:20 UTC autocenter";
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
@@ -343,34 +343,35 @@ async function captionPathPoint(connector, captionIndex = 0) {
     t = Math.min(1, Math.max(0, caps[0].position));
   }
 
-  // Anchor at the endpoint this caption is nearest (endpoints are exact).
+  // BASE: walk the reconstructed elbow path by caption.position. Verified
+  // against real captures (vertical top/bottom + horizontal left wires) — this
+  // lands on the label for the large majority of connectors automatically.
+  const path = buildElbowPath(
+    a, b, connector.start?.snapTo, connector.end?.snapTo
+  );
+  const base = pointAlongPath(path, t);
+
+  // MANUAL NUDGE: the dx/dy boxes add an optional offset as a % of the
+  // connector's own size, for the occasional outlier the auto-formula misses.
+  // Default 0/0 means pure auto-centering. Direction follows toward far end.
   const nearStart = t < 0.5;
-  const endpt = nearStart ? a : b;
-
-  // Offset is a PERCENTAGE OF THIS CONNECTOR'S OWN SIZE, so it scales per line
-  // (every connector has different proportions). The sliders set the percent.
-  // Direction: move FROM the nearest endpoint TOWARD the other endpoint, so a
-  // positive slider value always nudges along the wire into the line. Sign of
-  // each axis follows the direction to the far endpoint.
   const far = nearStart ? b : a;
-  const signX = Math.sign(far.x - endpt.x) || 1;
-  const signY = Math.sign(far.y - endpt.y) || 1;
-
+  const near = nearStart ? a : b;
+  const signX = Math.sign(far.x - near.x) || 1;
+  const signY = Math.sign(far.y - near.y) || 1;
   const w = typeof connector.width === "number" ? connector.width : 0;
   const h = typeof connector.height === "number" ? connector.height : 0;
-
-  const fx = dxFraction(); // -1..1
+  const fx = dxFraction();
   const fy = dyFraction();
 
   const p = {
-    x: endpt.x + signX * fx * w,
-    y: endpt.y + signY * fy * h,
+    x: base.x + signX * fx * w,
+    y: base.y + signY * fy * h,
   };
 
   console.log(
-    "[connector-search] capIdx:", captionIndex, "nearStart:", nearStart,
-    "endpt:", endpt, "far:", far, "w:", w, "h:", h,
-    "fx:", fx, "fy:", fy, "signX:", signX, "signY:", signY, "-> point:", p
+    "[connector-search] capIdx:", captionIndex, "t:", t,
+    "base:", base, "nudge%:", { dx: fx * 100, dy: fy * 100 }, "-> point:", p
   );
   return p;
 }
