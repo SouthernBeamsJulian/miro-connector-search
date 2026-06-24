@@ -143,7 +143,18 @@ function matchingCaptionIndexes(connector, term) {
 // ---------------------------------------------------------------------------
 
 const FRAME_HALF_WIDTH = 600;   // smaller = closer zoom
-const PANEL_WIDTH_DP = 368;     // Miro panel width, for horizontal centering
+
+// Horizontal centering correction for the panel covering the right of the
+// window. Symptom of over-correction: opposite ends drift in opposite X
+// directions. Lower this if the landing is consistently shifted; 0 disables it.
+const PANEL_WIDTH_DP = 0;
+
+// Captions sit a little INWARD from the endpoint, not exactly on it. When we
+// snap to an endpoint, pull the point this fraction of the way back along the
+// wire toward the connector's middle so we land ON the label, not past it.
+// Increase if the landing is still too close to the terminal (too high on
+// vertical wires); decrease if it overshoots past the label.
+const ENDPOINT_INSET = 0.06;
 
 // Resolve an endpoint to its actual ATTACH POINT on the board (not just the
 // item center). The connector attaches at a point on the item's border defined
@@ -282,9 +293,11 @@ async function captionPathPoint(connector, captionIndex = 0) {
   const SNAP_THRESHOLD = 0.25; // within 25% of an end -> use that exact end
   let p;
   if (t <= SNAP_THRESHOLD) {
-    p = a; // near the start end
+    // Near the start end: take the exact endpoint, then move slightly inward
+    // along the path toward the middle so we land on the label, not the terminal.
+    p = pointAlongPath(path, ENDPOINT_INSET);
   } else if (t >= 1 - SNAP_THRESHOLD) {
-    p = b; // near the end end
+    p = pointAlongPath(path, 1 - ENDPOINT_INSET);
   } else {
     p = pointAlongPath(path, t);
   }
