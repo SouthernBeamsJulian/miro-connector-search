@@ -143,8 +143,7 @@ async function runSearch() {
     const div = document.createElement("div");
     div.className = "result";
     div.innerHTML =
-      `<div class="caption">${highlight(m.text, term)}</div>` +
-      `<div class="sub">connector ${m.connector.id} — click to jump to an end (click again for the other)</div>`;
+      `<div class="caption">${highlight(m.text, term)}</div>`;
     // Each result remembers which endpoint to show next, so repeated clicks
     // toggle: 1st click -> endpoint A, 2nd -> endpoint B, 3rd -> A, ...
     let endpointCursor = 0;

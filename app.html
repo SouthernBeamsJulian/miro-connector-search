@@ -6,24 +6,32 @@
     <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/mirotone/dist/styles.css" />
     <style>
-      body { margin: 0; padding: 16px; box-sizing: border-box; }
-      .row { display: flex; gap: 8px; margin-bottom: 12px; }
+      html, body { height: 100%; }
+      body {
+        margin: 0; padding: 16px; box-sizing: border-box;
+        display: flex; flex-direction: column;
+      }
+      .subtitle { font-size: 12px; color: #787878; margin-bottom: 12px; }
+      .row { display: flex; gap: 8px; margin-bottom: 12px; flex: 0 0 auto; }
       .row input { flex: 1; }
-      .meta { font-size: 12px; color: #585858; margin-bottom: 8px; }
+      .meta { font-size: 12px; color: #585858; margin-bottom: 8px; flex: 0 0 auto; }
       .muted { color: #787878; font-size: 12px; }
+      /* Results take the remaining height and scroll with the mouse wheel. */
+      #results { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
       .result {
         border: 1px solid #e6e6e6; border-radius: 6px;
         padding: 8px 10px; margin-bottom: 8px; cursor: pointer;
       }
       .result:hover { background: #f2f2f4; }
       .result .caption {
-        font-size: 13px; margin-bottom: 2px; word-break: break-word;
+        font-size: 13px; word-break: break-word;
       }
       .result .sub { font-size: 11px; color: #787878; }
       mark { background: #ffd02f; padding: 0 1px; }
     </style>
   </head>
   <body>
+    <div class="subtitle">click to jump to an end (click again for the other)</div>
     <div class="row">
       <input id="q" class="input" type="text"
              placeholder="Search connector text…" autocomplete="off" />
@@ -31,6 +39,6 @@
     </div>
     <div class="meta" id="status">Type a term and press Search (or Enter).</div>
     <div id="results"></div>
-    <script src="app.js?v=20260624h"></script>
+    <script src="app.js?v=20260624i"></script>
   </body>
 </html>
