@@ -56,6 +56,35 @@
         background: #ffd02f;
         padding: 0 1px;
       }
+      .tuner {
+        border: 1px solid #e6e6e6;
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-bottom: 12px;
+        font-size: 12px;
+      }
+      .tuner .tuner-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 6px 0;
+      }
+      .tuner .tuner-row label {
+        width: 70px;
+        color: #585858;
+      }
+      .tuner .tuner-row input[type="range"] {
+        flex: 1;
+      }
+      .tuner .tuner-row .val {
+        width: 56px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .tuner .hint {
+        color: #787878;
+        margin-top: 4px;
+      }
     </style>
   </head>
   <body>
@@ -69,6 +98,24 @@
       />
       <button id="go" class="button button-primary">Search</button>
     </div>
+
+    <div class="tuner">
+      <div class="tuner-row">
+        <label for="dx">dx %</label>
+        <input id="dx" type="range" min="-100" max="100" step="1" value="0" />
+        <span class="val" id="dxVal">0%</span>
+      </div>
+      <div class="tuner-row">
+        <label for="dy">dy %</label>
+        <input id="dy" type="range" min="-100" max="100" step="1" value="0" />
+        <span class="val" id="dyVal">0%</span>
+      </div>
+      <div class="hint">
+        Offset as % of the clicked connector's own size. Adjust, then click the
+        same result again to re-center. Tell Claude the final values to bake in.
+      </div>
+    </div>
+
     <div class="meta" id="status">Type a term and press Search (or Enter).</div>
     <div id="results"></div>
 
