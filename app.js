@@ -71,39 +71,35 @@ async function endpointPoint(endpoint) {
   return { x: cx, y: cy };
 }
 
-// Frame the connector's two endpoints in the viewport.
-async function frameConnector(connector) {
-  const a = await endpointPoint(connector.start);
-  const b = await endpointPoint(connector.end);
+// Zoom tightly onto a single point (one endpoint). Smaller = closer.
+const ENDPOINT_FRAME = 1200; // board units (dp) of the framed area's width
 
-  // If we can't resolve endpoints, fall back to the SDK's own framing.
-  if (!a && !b) {
-    await miro.board.viewport.zoomTo(connector);
-    return;
+async function zoomToPoint(p) {
+  if (!p) return;
+  let aspect = 16 / 9;
+  try {
+    const vp = await miro.board.viewport.get();
+    if (vp && vp.width > 0 && vp.height > 0) aspect = vp.width / vp.height;
+  } catch {
+    /* keep default */
   }
-  const p1 = a || b;
-  const p2 = b || a;
-
-  // Bounding box around the two endpoints, with a margin so the line isn't
-  // jammed against the window edges. Margin scales with the line's size but has
-  // a sensible minimum for very short connectors.
-  const minX = Math.min(p1.x, p2.x);
-  const minY = Math.min(p1.y, p2.y);
-  const spanX = Math.abs(p2.x - p1.x);
-  const spanY = Math.abs(p2.y - p1.y);
-  const margin = Math.max(200, spanX * 0.2, spanY * 0.2);
-
-  const viewport = {
-    x: minX - margin,
-    y: minY - margin,
-    width: spanX + margin * 2,
-    height: spanY + margin * 2,
-  };
-
+  const halfW = ENDPOINT_FRAME / 2;
+  const halfH = halfW / aspect;
   await miro.board.viewport.set({
-    viewport,
+    viewport: {
+      x: p.x - halfW,
+      y: p.y - halfH,
+      width: halfW * 2,
+      height: halfH * 2,
+    },
     animationDurationInMs: 300,
   });
+}
+
+async function connectorEndpoints(connector) {
+  const a = await endpointPoint(connector.start);
+  const b = await endpointPoint(connector.end);
+  return [a, b].filter(Boolean);
 }
 
 async function runSearch() {
@@ -148,10 +144,20 @@ async function runSearch() {
     div.className = "result";
     div.innerHTML =
       `<div class="caption">${highlight(m.text, term)}</div>` +
-      `<div class="sub">connector ${m.connector.id} — click to view</div>`;
+      `<div class="sub">connector ${m.connector.id} — click to jump to an end (click again for the other)</div>`;
+    // Each result remembers which endpoint to show next, so repeated clicks
+    // toggle: 1st click -> endpoint A, 2nd -> endpoint B, 3rd -> A, ...
+    let endpointCursor = 0;
     div.addEventListener("click", async () => {
       try {
-        await frameConnector(m.connector);
+        const pts = await connectorEndpoints(m.connector);
+        if (pts.length === 0) {
+          await miro.board.viewport.zoomTo(m.connector);
+          return;
+        }
+        const p = pts[endpointCursor % pts.length];
+        endpointCursor++;
+        await zoomToPoint(p);
       } catch (e) {
         statusEl.textContent = "Couldn't focus: " + e.message;
       }
