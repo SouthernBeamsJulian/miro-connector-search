@@ -7,7 +7,7 @@
 
 // Build stamp — shown in the status line so you can confirm Miro is running the
 // latest deployed file (not a cached older one). Bump this each time you deploy.
-const BUILD_VERSION = "2026-06-24 01:03 UTC sliders";
+const BUILD_VERSION = "2026-06-24 01:25 UTC capture";
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
@@ -26,8 +26,31 @@ function dxFraction() {
 function dyFraction() {
   return (dyEl ? Number(dyEl.value) : 0) / 100;
 }
-if (dxEl) dxEl.addEventListener("input", () => { dxValEl.textContent = dxEl.value + "%"; });
-if (dyEl) dyEl.addEventListener("input", () => { dyValEl.textContent = dyEl.value + "%"; });
+
+// Robust slider wiring with a visible self-test. On every drag we update BOTH
+// the little %-label and the status line, so we can see live whether events are
+// firing at all. At startup we report whether the slider elements were found.
+function wireSlider(sliderEl, valEl, name) {
+  if (!sliderEl) return false;
+  const handler = function () {
+    if (valEl) valEl.textContent = sliderEl.value + "%";
+    if (statusEl) {
+      statusEl.textContent =
+        `${name}=${sliderEl.value}%  (dx=${dxEl ? dxEl.value : "?"} dy=${dyEl ? dyEl.value : "?"}) · build ${BUILD_VERSION}`;
+    }
+  };
+  sliderEl.addEventListener("input", handler);
+  sliderEl.addEventListener("change", handler);
+  handler();
+  return true;
+}
+
+const dxOk = wireSlider(dxEl, dxValEl, "dx");
+const dyOk = wireSlider(dyEl, dyValEl, "dy");
+if (statusEl) {
+  statusEl.textContent =
+    `sliders found: dx=${dxOk} dy=${dyOk} · build ${BUILD_VERSION}`;
+}
 
 // Connector captions can contain inline HTML (e.g. "<p>depends</p>").
 // Strip tags so we search and display the plain text the user actually sees.
@@ -119,6 +142,7 @@ async function runSearch() {
         const idxs = matchingCaptionIndexes(m.connector, term);
         const chosen = idxs.length ? idxs[captionCursor % idxs.length] : 0;
         captionCursor++;
+        lastClicked = { connector: m.connector, captionIndex: chosen, term };
         await centerOnCaption(m.connector, chosen);
       } catch (e) {
         statusEl.textContent = "Couldn't zoom: " + e.message;
@@ -127,6 +151,10 @@ async function runSearch() {
     resultsEl.appendChild(div);
   }
 }
+
+// Remember the last result clicked, so the Capture button can log its geometry
+// alongside the slider values you dialed in.
+let lastClicked = null;
 
 // Return the indexes of captions on this connector whose plain text contains
 // the search term (so we center on a caption the user actually matched).
@@ -391,6 +419,46 @@ goEl.addEventListener("click", runSearch);
 qEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") runSearch();
 });
+
+// Capture button: gather the last-clicked connector's geometry + the slider
+// values you settled on, into a single copyable line. Collect a few of these
+// across different connectors and the general centering formula can be derived.
+const captureEl = document.getElementById("capture");
+if (captureEl) {
+  captureEl.addEventListener("click", async () => {
+    if (!lastClicked) {
+      statusEl.textContent = "Click a search result first, then Capture.";
+      return;
+    }
+    const c = lastClicked.connector;
+    const a = await endpointAttachPoint(c.start);
+    const b = await endpointAttachPoint(c.end);
+    const cap = (c.captions || [])[lastClicked.captionIndex] || {};
+    const row = {
+      id: c.id,
+      shape: c.shape,
+      width: c.width,
+      height: c.height,
+      startSnap: c.start?.snapTo,
+      endSnap: c.end?.snapTo,
+      A: a,
+      B: b,
+      captionIndex: lastClicked.captionIndex,
+      captionPosition: cap.position,
+      captionText: stripHtml(cap.content || ""),
+      good_dx_pct: dxEl ? Number(dxEl.value) : null,
+      good_dy_pct: dyEl ? Number(dyEl.value) : null,
+    };
+    const text = "CAPTURE " + JSON.stringify(row);
+    console.log("[connector-search]", text);
+    try {
+      await navigator.clipboard.writeText(text);
+      statusEl.textContent = "Captured + copied to clipboard. Paste to Claude.";
+    } catch {
+      statusEl.textContent = "Captured (see console; clipboard blocked).";
+    }
+  });
+}
 
 // Focus the input as soon as the panel opens.
 qEl.focus();
