@@ -7,12 +7,27 @@
 
 // Build stamp — shown in the status line so you can confirm Miro is running the
 // latest deployed file (not a cached older one). Bump this each time you deploy.
-const BUILD_VERSION = "2026-06-24 00:53 UTC";
+const BUILD_VERSION = "2026-06-24 01:03 UTC sliders";
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
+
+// Live offset tuners (percent of the connector's own size). Read at click time.
+const dxEl = document.getElementById("dx");
+const dyEl = document.getElementById("dy");
+const dxValEl = document.getElementById("dxVal");
+const dyValEl = document.getElementById("dyVal");
+
+function dxFraction() {
+  return (dxEl ? Number(dxEl.value) : 0) / 100;
+}
+function dyFraction() {
+  return (dyEl ? Number(dyEl.value) : 0) / 100;
+}
+if (dxEl) dxEl.addEventListener("input", () => { dxValEl.textContent = dxEl.value + "%"; });
+if (dyEl) dyEl.addEventListener("input", () => { dyValEl.textContent = dyEl.value + "%"; });
 
 // Connector captions can contain inline HTML (e.g. "<p>depends</p>").
 // Strip tags so we search and display the plain text the user actually sees.
@@ -152,13 +167,10 @@ const FRAME_HALF_WIDTH = 600;   // smaller = closer zoom
 // window. 0 disables it. Raise only if every result lands too far right.
 const PANEL_WIDTH_DP = 0;
 
-// How far (in board units / dp) the caption sits INWARD from the endpoint,
-// measured ALONG the wire's exit direction. The wire leaves the endpoint in the
-// direction given by snapTo (bottom => upward, top => downward, etc.), so we
-// move this many units that way to land on the label. Tune to your label
-// spacing: increase if the landing is still too close to the terminal, decrease
-// if it overshoots past the label toward the middle.
-const CAPTION_OFFSET_DP = 220;
+// NOTE: the caption offset is no longer a fixed distance. It is set live by the
+// dx%/dy% sliders in the panel and applied as a fraction of EACH connector's
+// own width/height (see captionPathPoint), so it scales per line. Once the
+// right percentages are found, set the sliders' default `value` in app.html.
 
 // Resolve an endpoint to its actual ATTACH POINT on the board (not just the
 // item center). The connector attaches at a point on the item's border defined
@@ -283,44 +295,34 @@ async function captionPathPoint(connector, captionIndex = 0) {
     t = Math.min(1, Math.max(0, caps[0].position));
   }
 
-  // Decide which endpoint this caption is nearest, and the exit direction of
-  // the wire at that endpoint (from snapTo). The wire leaves the endpoint in
-  // that direction, so the label sits a fixed distance that way.
+  // Anchor at the endpoint this caption is nearest (endpoints are exact).
   const nearStart = t < 0.5;
   const endpt = nearStart ? a : b;
-  const snap = nearStart ? connector.start?.snapTo : connector.end?.snapTo;
 
-  // Unit vector pointing AWAY from the terminal, along the wire.
-  // snapTo 'bottom' means the wire attaches at the item's bottom and goes
-  // downward away from it -> but the label is along the wire, i.e. further from
-  // the item. For these diagrams the wire runs away from the item edge, so we
-  // move in the direction the wire travels. We infer that from the OTHER
-  // endpoint: the wire heads from this endpoint toward the other one.
-  let dirX = 0;
-  let dirY = 0;
-  if (snap === "bottom" || snap === "top") {
-    // Vertical wire: move along Y toward the other endpoint. X stays exact.
-    dirY = (nearStart ? b.y - a.y : a.y - b.y) >= 0 ? 1 : -1;
-  } else if (snap === "left" || snap === "right") {
-    // Horizontal wire: move along X toward the other endpoint. Y stays exact.
-    dirX = (nearStart ? b.x - a.x : a.x - b.x) >= 0 ? 1 : -1;
-  } else {
-    // Unknown snap: fall back to heading toward the other endpoint.
-    const ox = (nearStart ? b.x - a.x : a.x - b.x);
-    const oy = (nearStart ? b.y - a.y : a.y - b.y);
-    const len = Math.hypot(ox, oy) || 1;
-    dirX = ox / len;
-    dirY = oy / len;
-  }
+  // Offset is a PERCENTAGE OF THIS CONNECTOR'S OWN SIZE, so it scales per line
+  // (every connector has different proportions). The sliders set the percent.
+  // Direction: move FROM the nearest endpoint TOWARD the other endpoint, so a
+  // positive slider value always nudges along the wire into the line. Sign of
+  // each axis follows the direction to the far endpoint.
+  const far = nearStart ? b : a;
+  const signX = Math.sign(far.x - endpt.x) || 1;
+  const signY = Math.sign(far.y - endpt.y) || 1;
+
+  const w = typeof connector.width === "number" ? connector.width : 0;
+  const h = typeof connector.height === "number" ? connector.height : 0;
+
+  const fx = dxFraction(); // -1..1
+  const fy = dyFraction();
 
   const p = {
-    x: endpt.x + dirX * CAPTION_OFFSET_DP,
-    y: endpt.y + dirY * CAPTION_OFFSET_DP,
+    x: endpt.x + signX * fx * w,
+    y: endpt.y + signY * fy * h,
   };
 
   console.log(
     "[connector-search] capIdx:", captionIndex, "nearStart:", nearStart,
-    "snap:", snap, "endpt:", endpt, "dir:", { dirX, dirY }, "-> point:", p
+    "endpt:", endpt, "far:", far, "w:", w, "h:", h,
+    "fx:", fx, "fy:", fy, "signX:", signX, "signY:", signY, "-> point:", p
   );
   return p;
 }
