@@ -7,7 +7,7 @@
 
 // Build stamp — shown in the status line so you can confirm Miro is running the
 // latest deployed file (not a cached older one). Bump this each time you deploy.
-const BUILD_VERSION = "2026-06-24 01:25 UTC capture";
+const BUILD_VERSION = "2026-06-24 01:40 UTC capture2";
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
@@ -424,38 +424,65 @@ qEl.addEventListener("keydown", (e) => {
 // values you settled on, into a single copyable line. Collect a few of these
 // across different connectors and the general centering formula can be derived.
 const captureEl = document.getElementById("capture");
+
+// Show capture output as SELECTABLE text in the panel (clipboard is often
+// blocked inside the Miro iframe, so we never depend on it). Creates/reuses a
+// textarea below the button that you can select-all and copy manually.
+function showCapture(text) {
+  let box = document.getElementById("captureOut");
+  if (!box) {
+    box = document.createElement("textarea");
+    box.id = "captureOut";
+    box.readOnly = true;
+    box.style.width = "100%";
+    box.style.height = "90px";
+    box.style.marginTop = "8px";
+    box.style.fontSize = "11px";
+    box.style.fontFamily = "monospace";
+    if (captureEl && captureEl.parentNode) {
+      captureEl.parentNode.appendChild(box);
+    } else {
+      document.body.appendChild(box);
+    }
+  }
+  box.value = text;
+  box.focus();
+  box.select();
+}
+
 if (captureEl) {
   captureEl.addEventListener("click", async () => {
-    if (!lastClicked) {
-      statusEl.textContent = "Click a search result first, then Capture.";
-      return;
-    }
-    const c = lastClicked.connector;
-    const a = await endpointAttachPoint(c.start);
-    const b = await endpointAttachPoint(c.end);
-    const cap = (c.captions || [])[lastClicked.captionIndex] || {};
-    const row = {
-      id: c.id,
-      shape: c.shape,
-      width: c.width,
-      height: c.height,
-      startSnap: c.start?.snapTo,
-      endSnap: c.end?.snapTo,
-      A: a,
-      B: b,
-      captionIndex: lastClicked.captionIndex,
-      captionPosition: cap.position,
-      captionText: stripHtml(cap.content || ""),
-      good_dx_pct: dxEl ? Number(dxEl.value) : null,
-      good_dy_pct: dyEl ? Number(dyEl.value) : null,
-    };
-    const text = "CAPTURE " + JSON.stringify(row);
-    console.log("[connector-search]", text);
     try {
-      await navigator.clipboard.writeText(text);
-      statusEl.textContent = "Captured + copied to clipboard. Paste to Claude.";
-    } catch {
-      statusEl.textContent = "Captured (see console; clipboard blocked).";
+      if (!lastClicked) {
+        showCapture("Click a search result first, then Capture.");
+        return;
+      }
+      const c = lastClicked.connector;
+      const a = await endpointAttachPoint(c.start);
+      const b = await endpointAttachPoint(c.end);
+      const cap = (c.captions || [])[lastClicked.captionIndex] || {};
+      const row = {
+        id: c.id,
+        shape: c.shape,
+        width: c.width,
+        height: c.height,
+        startSnap: c.start?.snapTo,
+        endSnap: c.end?.snapTo,
+        A: a,
+        B: b,
+        captionIndex: lastClicked.captionIndex,
+        captionPosition: cap.position,
+        captionText: stripHtml(cap.content || ""),
+        good_dx_pct: dxEl ? Number(dxEl.value) : null,
+        good_dy_pct: dyEl ? Number(dyEl.value) : null,
+      };
+      const text = "CAPTURE " + JSON.stringify(row);
+      console.log("[connector-search]", text);
+      showCapture(text);
+      // Best-effort clipboard; ignore if the iframe blocks it.
+      try { await navigator.clipboard.writeText(text); } catch {}
+    } catch (e) {
+      showCapture("Capture error: " + e.message);
     }
   });
 }
