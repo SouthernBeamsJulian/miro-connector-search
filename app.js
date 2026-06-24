@@ -5,6 +5,10 @@
 // All of this runs client-side through the Web SDK — no REST API, no tokens.
 // ---------------------------------------------------------------------------
 
+// Build stamp — shown in the status line so you can confirm Miro is running the
+// latest deployed file (not a cached older one). Bump this each time you deploy.
+const BUILD_VERSION = "2026-06-24 00:45 UTC";
+
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
 const statusEl = document.getElementById("status");
@@ -325,7 +329,8 @@ async function centerOnCaption(connector, captionIndex = 0) {
   const p = await captionPathPoint(connector, captionIndex);
 
   if (p) {
-    statusEl.textContent = `centering on x=${Math.round(p.x)} y=${Math.round(p.y)}`;
+    statusEl.textContent =
+      `centering on x=${Math.round(p.x)} y=${Math.round(p.y)} · build ${BUILD_VERSION}`;
   }
 
   if (!p) {
@@ -365,3 +370,6 @@ qEl.addEventListener("keydown", (e) => {
 
 // Focus the input as soon as the panel opens.
 qEl.focus();
+
+// Show the build version immediately so you can confirm the deployed version.
+if (statusEl) statusEl.textContent = `build ${BUILD_VERSION} — ready`;
