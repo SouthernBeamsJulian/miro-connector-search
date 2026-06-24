@@ -7,7 +7,7 @@
 
 // Build stamp — shown in the status line so you can confirm Miro is running the
 // latest deployed file (not a cached older one). Bump this each time you deploy.
-const BUILD_VERSION = "2026-06-24 00:45 UTC";
+const BUILD_VERSION = "DIAG-2 verify-landing";
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
@@ -361,6 +361,28 @@ async function centerOnCaption(connector, captionIndex = 0) {
     padding: { top: 0, bottom: 0, left: 0, right: PANEL_WIDTH_DP },
     animationDurationInMs: 300,
   });
+
+  // DECISIVE DIAGNOSTIC: read where Miro actually landed AFTER the move. If this
+  // center doesn't match the point we asked for, the problem is the zoom being
+  // overridden/clamped — not our math. We wait past the animation, then report
+  // requested-vs-actual in the status line.
+  setTimeout(async () => {
+    try {
+      const after = await miro.board.viewport.get();
+      const actualCx = Math.round(after.x + after.width / 2);
+      const actualCy = Math.round(after.y + after.height / 2);
+      const dx = actualCx - Math.round(p.x);
+      const dy = actualCy - Math.round(p.y);
+      statusEl.textContent =
+        `asked x=${Math.round(p.x)} y=${Math.round(p.y)} | ` +
+        `landed x=${actualCx} y=${actualCy} | ` +
+        `off dx=${dx} dy=${dy} · build ${BUILD_VERSION}`;
+      console.log("[connector-search] post-move viewport:", after,
+        "requested point:", p, "delta:", { dx, dy });
+    } catch (e) {
+      console.log("[connector-search] post-move viewport.get failed:", e);
+    }
+  }, 600);
 }
 
 goEl.addEventListener("click", runSearch);
