@@ -7,6 +7,7 @@
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
+const sortEl = document.getElementById("sort");
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
 
@@ -139,6 +140,19 @@ async function runSearch() {
     return;
   }
 
+  // Order results according to the sort selector. "Natural" comparison so that
+  // wire numbers sort sensibly (e.g. 808 before 80116, not after it as raw
+  // strings would do). "board" leaves them in the order the board returned.
+  const mode = sortEl ? sortEl.value : "az";
+  if (mode !== "board") {
+    const collator = new Intl.Collator(undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+    matches.sort((m1, m2) => collator.compare(m1.text, m2.text));
+    if (mode === "za") matches.reverse();
+  }
+
   for (const m of matches) {
     const div = document.createElement("div");
     div.className = "result";
@@ -169,5 +183,6 @@ goEl.addEventListener("click", runSearch);
 qEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") runSearch();
 });
+if (sortEl) sortEl.addEventListener("change", runSearch);
 
 qEl.focus();
