@@ -7,7 +7,7 @@
 
 // Build stamp — shown in the status line so you can confirm Miro is running the
 // latest deployed file (not a cached older one). Bump this each time you deploy.
-const BUILD_VERSION = "DIAG-2 verify-landing";
+const BUILD_VERSION = "2026-06-24 00:53 UTC";
 
 const qEl = document.getElementById("q");
 const goEl = document.getElementById("go");
