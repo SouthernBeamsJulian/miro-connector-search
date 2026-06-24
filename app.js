@@ -145,16 +145,16 @@ function matchingCaptionIndexes(connector, term) {
 const FRAME_HALF_WIDTH = 600;   // smaller = closer zoom
 
 // Horizontal centering correction for the panel covering the right of the
-// window. Symptom of over-correction: opposite ends drift in opposite X
-// directions. Lower this if the landing is consistently shifted; 0 disables it.
+// window. 0 disables it. Raise only if every result lands too far right.
 const PANEL_WIDTH_DP = 0;
 
-// Captions sit a little INWARD from the endpoint, not exactly on it. When we
-// snap to an endpoint, pull the point this fraction of the way back along the
-// wire toward the connector's middle so we land ON the label, not past it.
-// Increase if the landing is still too close to the terminal (too high on
-// vertical wires); decrease if it overshoots past the label.
-const ENDPOINT_INSET = 0.06;
+// How far (in board units / dp) the caption sits INWARD from the endpoint,
+// measured ALONG the wire's exit direction. The wire leaves the endpoint in the
+// direction given by snapTo (bottom => upward, top => downward, etc.), so we
+// move this many units that way to land on the label. Tune to your label
+// spacing: increase if the landing is still too close to the terminal, decrease
+// if it overshoots past the label toward the middle.
+const CAPTION_OFFSET_DP = 220;
 
 // Resolve an endpoint to its actual ATTACH POINT on the board (not just the
 // item center). The connector attaches at a point on the item's border defined
@@ -279,32 +279,44 @@ async function captionPathPoint(connector, captionIndex = 0) {
     t = Math.min(1, Math.max(0, caps[0].position));
   }
 
-  let path;
-  if (connector.shape === "elbowed") {
-    path = buildElbowPath(a, b, connector.start?.snapTo, connector.end?.snapTo);
+  // Decide which endpoint this caption is nearest, and the exit direction of
+  // the wire at that endpoint (from snapTo). The wire leaves the endpoint in
+  // that direction, so the label sits a fixed distance that way.
+  const nearStart = t < 0.5;
+  const endpt = nearStart ? a : b;
+  const snap = nearStart ? connector.start?.snapTo : connector.end?.snapTo;
+
+  // Unit vector pointing AWAY from the terminal, along the wire.
+  // snapTo 'bottom' means the wire attaches at the item's bottom and goes
+  // downward away from it -> but the label is along the wire, i.e. further from
+  // the item. For these diagrams the wire runs away from the item edge, so we
+  // move in the direction the wire travels. We infer that from the OTHER
+  // endpoint: the wire heads from this endpoint toward the other one.
+  let dirX = 0;
+  let dirY = 0;
+  if (snap === "bottom" || snap === "top") {
+    // Vertical wire: move along Y toward the other endpoint. X stays exact.
+    dirY = (nearStart ? b.y - a.y : a.y - b.y) >= 0 ? 1 : -1;
+  } else if (snap === "left" || snap === "right") {
+    // Horizontal wire: move along X toward the other endpoint. Y stays exact.
+    dirX = (nearStart ? b.x - a.x : a.x - b.x) >= 0 ? 1 : -1;
   } else {
-    path = [a, b];
+    // Unknown snap: fall back to heading toward the other endpoint.
+    const ox = (nearStart ? b.x - a.x : a.x - b.x);
+    const oy = (nearStart ? b.y - a.y : a.y - b.y);
+    const len = Math.hypot(ox, oy) || 1;
+    dirX = ox / len;
+    dirY = oy / len;
   }
 
-  // Wire-number labels sit very near an endpoint. Our endpoint attach points
-  // (a, b) are EXACT, while the reconstructed mid-path is approximate. So if the
-  // caption's fraction is close to an end, snap to that exact endpoint — this
-  // lands on the label far more reliably than interpolating a fuzzy path.
-  const SNAP_THRESHOLD = 0.25; // within 25% of an end -> use that exact end
-  let p;
-  if (t <= SNAP_THRESHOLD) {
-    // Near the start end: take the exact endpoint, then move slightly inward
-    // along the path toward the middle so we land on the label, not the terminal.
-    p = pointAlongPath(path, ENDPOINT_INSET);
-  } else if (t >= 1 - SNAP_THRESHOLD) {
-    p = pointAlongPath(path, 1 - ENDPOINT_INSET);
-  } else {
-    p = pointAlongPath(path, t);
-  }
+  const p = {
+    x: endpt.x + dirX * CAPTION_OFFSET_DP,
+    y: endpt.y + dirY * CAPTION_OFFSET_DP,
+  };
 
   console.log(
-    "[connector-search] capIdx:", captionIndex, "A:", a, "B:", b, "t:", t,
-    "shape:", connector.shape, "-> point:", p
+    "[connector-search] capIdx:", captionIndex, "nearStart:", nearStart,
+    "snap:", snap, "endpt:", endpt, "dir:", { dirX, dirY }, "-> point:", p
   );
   return p;
 }
